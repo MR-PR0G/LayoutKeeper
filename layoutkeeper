@@ -8,7 +8,6 @@ DE_WM=""
 LAYOUT_SAVED=false
 SAVED_LAYOUT=""
 
-# Defaults
 US_INDEX="0"
 RESTORE_INDEX="1"
 
@@ -20,7 +19,6 @@ load_config() {
     TERMINALS=$(grep -E "^terminals" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ' | tr ',' ' ')
     DEBUG=$(grep -E "^debug" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ' | tr '[:upper:]' '[:lower:]')
     
-    # Read custom layout indexes if they exist
     local cfg_us=$(grep -E "^us_index" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ')
     local cfg_restore=$(grep -E "^restore_index" "$CONFIG_FILE" | cut -d'=' -f2 | tr -d ' ')
     
@@ -77,7 +75,7 @@ get_current_layout() {
                 swaymsg -t get_inputs | jq -r '.[] | select(.type=="keyboard") | .xkb_active_layout_name' | head -n1
                 ;;
             niri)
-                echo "$RESTORE_INDEX"
+                niri msg -j keyboard-layouts 2>/dev/null | jq -r '.current_idx // empty'
                 ;;
             gnome)
                 gsettings get org.gnome.desktop.input-sources current | awk '{print $2}'
@@ -90,7 +88,7 @@ get_current_layout() {
 }
 
 set_layout_us() {
-    log "Switching to US layout (Index: $US_INDEX)"
+    log "Switching to US layout"
     if [ "$ENV_TYPE" = "x11" ]; then
         setxkbmap us
     elif [ "$ENV_TYPE" = "wayland" ]; then
@@ -98,7 +96,7 @@ set_layout_us() {
             hyprland)
                 local kbds=$(hyprctl devices -j | jq -r '.keyboards[].name')
                 for k in $kbds; do
-                    hyprctl switchxkblayout "$k" 0 >/dev/null 2>&1
+                    hyprctl switchxkblayout "$k" "$US_INDEX" >/dev/null 2>&1
                 done
                 ;;
             sway)
@@ -119,7 +117,7 @@ set_layout_us() {
 
 restore_layout() {
     if [ -z "$SAVED_LAYOUT" ]; then return; fi
-    log "Restoring layout (Value/Index: $SAVED_LAYOUT)"
+    log "Restoring layout to: $SAVED_LAYOUT"
     
     if [ "$ENV_TYPE" = "x11" ]; then
         setxkbmap "$SAVED_LAYOUT"
@@ -128,7 +126,7 @@ restore_layout() {
             hyprland)
                 local kbds=$(hyprctl devices -j | jq -r '.keyboards[].name')
                 for k in $kbds; do
-                    hyprctl switchxkblayout "$k" next >/dev/null 2>&1
+                    hyprctl switchxkblayout "$k" "$SAVED_LAYOUT" >/dev/null 2>&1
                 done
                 ;;
             sway)
@@ -138,7 +136,7 @@ restore_layout() {
                 niri msg action switch-layout "$SAVED_LAYOUT" >/dev/null 2>&1
                 ;;
             gnome)
-                gsettings set org.gnome.desktop.input-sources current 1 >/dev/null 2>&1
+                gsettings set org.gnome.desktop.input-sources current "$SAVED_LAYOUT" >/dev/null 2>&1
                 ;;
             kde)
                 qdbus org.kde.keyboard /Layouts org.kde.KeyboardLayouts.setLayout "$SAVED_LAYOUT" >/dev/null 2>&1
@@ -199,21 +197,34 @@ monitor_focus() {
             if is_terminal "$CURRENT_WINDOW"; then
                 if [ "$LAYOUT_SAVED" = false ]; then
                     SAVED_LAYOUT=$(get_current_layout)
-                    set_layout_us
+                    
+                    # Ensure SAVED_LAYOUT is captured, fallback to RESTORE_INDEX if empty
+                    if [ -z "$SAVED_LAYOUT" ]; then
+                        SAVED_LAYOUT="$RESTORE_INDEX"
+                    fi
+
+                    log "Captured layout before switching: $SAVED_LAYOUT"
+                    
+                    # Only trigger layout switch if current layout is not US
+                    if [ "$SAVED_LAYOUT" != "$US_INDEX" ] && [ "$SAVED_LAYOUT" != "us" ]; then
+                        set_layout_us
+                    else
+                        log "Already in US layout, no switch required."
+                    fi
+                    
                     LAYOUT_SAVED=true
-                    log "Entered Terminal ($CURRENT_WINDOW). Set to US."
                 fi
             else
                 if [ "$LAYOUT_SAVED" = true ]; then
                     restore_layout
                     LAYOUT_SAVED=false
-                    log "Left Terminal ($PREV_WINDOW). Restored layout."
+                    log "Left Terminal. Restored layout to $SAVED_LAYOUT."
                 fi
             fi
             PREV_WINDOW="$CURRENT_WINDOW"
         fi
         
-        sleep 0.2
+        sleep 0.1
     done
 }
 
