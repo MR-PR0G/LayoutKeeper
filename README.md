@@ -3,18 +3,6 @@
 <p align="center">
   <b>Smart, seamless, and automated keyboard layout switcher for Linux terminals.</b>
 </p>
-
-<p align="center">
-  <a href="#features">Features</a> •
-  <a href="#installation">Installation</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#supported-environments">Supported Environments</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="#license">License</a>
-</p>
-
----
-
 Never accidentally type `<ctrl42>` or `در` instead of `ls` or `cd` again! 
 
 **LayoutKeeper** is a lightweight, background daemon for Linux that automatically switches your keyboard layout to **English (US)** whenever you focus a terminal application, and seamlessly **restores your previous layout** when you switch away.
@@ -50,6 +38,12 @@ Auto-detects: `kitty`, `alacritty`, `konsole`, `foot`, `wezterm`, `gnome-termina
 
 ### Interactive One-Step Installer
 
+Install LayoutKeeper instantly using bash without cloning the repository manually:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/MR-PR0G/LayoutKeeper/main/install.sh | bash
+```
+### Or
 Clone the repository and run the setup script:
 
 ```bash
