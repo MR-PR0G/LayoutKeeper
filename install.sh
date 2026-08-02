@@ -87,6 +87,14 @@ print_sysinfo() {
     echo -e "  Package Manager : ${YELLOW}$PKG_MNGR${RESET}\n"
 }
 
+is_installed() {
+    if [ -f "$BIN_DIR/layoutkeeper" ] || systemctl --user is-active --quiet layoutkeeper.service 2>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 select_terminals() {
     echo -e "${BOLD}[Terminal Detection]${RESET}"
     echo -e "Scanning system for installed terminals...\n"
@@ -158,11 +166,33 @@ print_banner
 detect_system
 print_sysinfo
 
-echo -e "${BOLD}Do you want to proceed with the installation?${RESET}"
-read -p " [Y/n]: " CONFIRM < /dev/tty
-if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
-    echo -e "${RED}Installation aborted.${RESET}"
-    exit 0
+if is_installed; then
+    echo -e "${YELLOW}${BOLD}LayoutKeeper is currently INSTALLED on this system.${RESET}\n"
+    echo -e "${BOLD}Select an action:${RESET}"
+    echo -e "  1) ${GREEN}Reinstall / Update${RESET} LayoutKeeper"
+    echo -e "  2) ${RED}Uninstall${RESET} LayoutKeeper"
+    echo -e "  3) ${CYAN}Cancel${RESET}"
+    read -p "Choose an option [1/2/3]: " ACTION_CHOICE < /dev/tty
+
+    case "$ACTION_CHOICE" in
+        2)
+            uninstall
+            ;;
+        3)
+            echo -e "${CYAN}Operation cancelled.${RESET}"
+            exit 0
+            ;;
+        1|*)
+            echo -e "\n${BLUE}=> Proceeding with Reinstallation...${RESET}\n"
+            ;;
+    esac
+else
+    echo -e "${BOLD}Do you want to proceed with the installation?${RESET}"
+    read -p " [Y/n]: " CONFIRM < /dev/tty
+    if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
+        echo -e "${RED}Installation aborted.${RESET}"
+        exit 0
+    fi
 fi
 
 select_terminals
