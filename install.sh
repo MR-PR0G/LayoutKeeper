@@ -114,11 +114,11 @@ select_terminals() {
     echo -e "  1) Use ${GREEN}ALL detected${RESET} terminals"
     echo -e "  2) Select ${YELLOW}ONE specific${RESET} terminal from the list"
     echo -e "  3) Enter a ${CYAN}CUSTOM list${RESET} manually"
-    read -p "Choose an option [1/2/3]: " TERM_CHOICE
+    read -p "Choose an option [1/2/3]: " TERM_CHOICE < /dev/tty
 
     case "$TERM_CHOICE" in
         2)
-            read -p "Enter the number of the terminal: " TERM_NUM
+            read -p "Enter the number of the terminal: " TERM_NUM < /dev/tty
             if [[ "$TERM_NUM" =~ ^[0-9]+$ ]] && [ "$TERM_NUM" -ge 1 ] && [ "$TERM_NUM" -le "${#DETECTED[@]}" ]; then
                 SELECTED_TERMS="${DETECTED[$((TERM_NUM-1))]}"
             else
@@ -127,7 +127,7 @@ select_terminals() {
             fi
             ;;
         3)
-            read -p "Enter terminals separated by commas (e.g., kitty,foot): " CUSTOM_TERMS
+            read -p "Enter terminals separated by commas (e.g., kitty,foot): " CUSTOM_TERMS < /dev/tty
             SELECTED_TERMS="${CUSTOM_TERMS// /}"
             ;;
         *)
@@ -159,7 +159,7 @@ detect_system
 print_sysinfo
 
 echo -e "${BOLD}Do you want to proceed with the installation?${RESET}"
-read -p " [Y/n]: " CONFIRM
+read -p " [Y/n]: " CONFIRM < /dev/tty
 if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
     echo -e "${RED}Installation aborted.${RESET}"
     exit 0
