@@ -3,7 +3,12 @@
 <p align="center">
   <b>Smart, seamless, and automated keyboard layout switcher for Linux terminals.</b>
 </p>
+
 Never accidentally type `<ctrl42>` or `در` instead of `ls` or `cd` again! 
+
+<p align="center">
+  <img src="Demos/screenshotone.png" alt="LayoutKeeper Screenshot" style="width: 100%; max-width: 800px; height: auto; display: block; margin: 0 auto; border-radius: 8px;">
+</p>
 
 **LayoutKeeper** is a lightweight, background daemon for Linux that automatically switches your keyboard layout to **English (US)** whenever you focus a terminal application, and seamlessly **restores your previous layout** when you switch away.
 
