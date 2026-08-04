@@ -1,9 +1,10 @@
 #!/bin/bash
 
 set -e
+set -o pipefail
 
 APP_NAME="layoutkeeper"
-VERSION="1.1.0"
+VERSION="1.2.0"
 REPO_RAW_URL="https://raw.githubusercontent.com/MR-PR0G/LayoutKeeper/main"
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="$HOME/.config/$APP_NAME"
@@ -70,9 +71,9 @@ detect_system() {
         LAYOUT_TOOL="N/A"
     fi
 
-    if command -v dnf &> /dev/null; then PKG_MNGR="dnf"
+    if command -v apt-get &> /dev/null; then PKG_MNGR="apt-get"
+    elif command -v dnf &> /dev/null; then PKG_MNGR="dnf"
     elif command -v pacman &> /dev/null; then PKG_MNGR="pacman"
-    elif command -v apt-get &> /dev/null; then PKG_MNGR="apt-get"
     elif command -v zypper &> /dev/null; then PKG_MNGR="zypper"
     else PKG_MNGR="Unknown"
     fi
@@ -99,7 +100,13 @@ select_terminals() {
     echo -e "${BOLD}[Terminal Detection]${RESET}"
     echo -e "Scanning system for installed terminals...\n"
 
-    KNOWN_TERMS=("kitty" "alacritty" "gnome-terminal" "konsole" "foot" "wezterm" "tilix" "terminator" "xterm" "urxvt" "xfce4-terminal" "qterminal" "st" "lxterminal")
+    KNOWN_TERMS=(
+        "kitty" "alacritty" "gnome-terminal" "konsole" "foot" "wezterm" 
+        "ghostty" "rio" "warp-terminal" "contour" "hyper" "tabby"
+        "tilix" "terminator" "xterm" "urxvt" "xfce4-terminal" "qterminal" 
+        "st" "lxterminal" "mate-terminal" "pantheon-terminal" 
+        "guake" "yakuake" "tilda" "terminology" "sakura" "mlterm"
+    )
     DETECTED=()
 
     for term in "${KNOWN_TERMS[@]}"; do
@@ -200,25 +207,22 @@ select_terminals
 echo -e "${BOLD}[Installation]${RESET}"
 echo -e "${BLUE}=>${RESET} Installing dependencies using ${YELLOW}$PKG_MNGR${RESET}..."
 
-WAYLAND_DEPS="jq"
-X11_DEPS="xdotool"
-
 case "$PKG_MNGR" in
     apt-get)
         sudo apt-get update
-        sudo apt-get install -y $WAYLAND_DEPS $X11_DEPS x11-utils xkbcomp setxkbmap
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y jq xdotool x11-utils x11-xkb-utils
         ;;
     pacman)
-        sudo pacman -Sy --noconfirm $WAYLAND_DEPS $X11_DEPS xorg-xprop xorg-setxkbmap xorg-xkbcomp
+        sudo pacman -Sy --noconfirm jq xdotool xorg-xprop xorg-setxkbmap xorg-xkbcomp
         ;;
     dnf)
-        sudo dnf install -y $WAYLAND_DEPS $X11_DEPS xprop libX11 xkbcomp
+        sudo dnf install -y jq xdotool xorg-x11-utils xorg-x11-server-utils
         ;;
     zypper)
-        sudo zypper install -y $WAYLAND_DEPS $X11_DEPS xprop setxkbmap
+        sudo zypper install -y jq xdotool xprop setxkbmap
         ;;
     *)
-        echo -e "${YELLOW}=> Warning: Unsupported package manager. Please ensure 'jq', 'xdotool', 'xprop', and 'setxkbmap' are installed.${RESET}"
+        echo -e "${YELLOW}=> Warning: Unsupported package manager. Please ensure 'jq', 'xdotool', 'xprop', and 'setxkbmap' are installed manually.${RESET}"
         ;;
 esac
 
