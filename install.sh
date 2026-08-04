@@ -4,7 +4,7 @@ set -e
 set -o pipefail
 
 APP_NAME="layoutkeeper"
-VERSION="1.2.0"
+VERSION="1.2.1"
 REPO_RAW_URL="https://raw.githubusercontent.com/MR-PR0G/LayoutKeeper/main"
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="$HOME/.config/$APP_NAME"
