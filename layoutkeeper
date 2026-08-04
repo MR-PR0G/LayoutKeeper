@@ -65,23 +65,23 @@ detect_env() {
 
 get_current_layout() {
     if [ "$ENV_TYPE" = "x11" ]; then
-        setxkbmap -query | grep layout | awk '{print $2}'
+        setxkbmap -query 2>/dev/null | grep layout | awk '{print $2}'
     elif [ "$ENV_TYPE" = "wayland" ]; then
         case "$DE_WM" in
             hyprland)
-                hyprctl devices -j | jq -r '.keyboards[] | select(.main == true) | .active_keymap'
+                hyprctl devices -j 2>/dev/null | jq -r '.keyboards[] | select(.main == true) | .active_keymap'
                 ;;
             sway)
-                swaymsg -t get_inputs | jq -r '.[] | select(.type=="keyboard") | .xkb_active_layout_name' | head -n1
+                swaymsg -t get_inputs 2>/dev/null | jq -r '.[] | select(.type=="keyboard") | .xkb_active_layout_name' | head -n1
                 ;;
             niri)
                 niri msg -j keyboard-layouts 2>/dev/null | jq -r '.current_idx // empty'
                 ;;
             gnome)
-                gsettings get org.gnome.desktop.input-sources current | awk '{print $2}'
+                gsettings get org.gnome.desktop.input-sources current 2>/dev/null | awk '{print $2}'
                 ;;
             kde)
-                qdbus org.kde.keyboard /Layouts org.kde.KeyboardLayouts.getLayouts | head -n1
+                qdbus org.kde.keyboard /Layouts org.kde.KeyboardLayouts.getLayouts 2>/dev/null | head -n1
                 ;;
         esac
     fi
@@ -90,11 +90,11 @@ get_current_layout() {
 set_layout_us() {
     log "Switching to US layout"
     if [ "$ENV_TYPE" = "x11" ]; then
-        setxkbmap us
+        setxkbmap us 2>/dev/null
     elif [ "$ENV_TYPE" = "wayland" ]; then
         case "$DE_WM" in
             hyprland)
-                local kbds=$(hyprctl devices -j | jq -r '.keyboards[].name')
+                local kbds=$(hyprctl devices -j 2>/dev/null | jq -r '.keyboards[].name')
                 for k in $kbds; do
                     hyprctl switchxkblayout "$k" "$US_INDEX" >/dev/null 2>&1
                 done
@@ -120,11 +120,11 @@ restore_layout() {
     log "Restoring layout to: $SAVED_LAYOUT"
     
     if [ "$ENV_TYPE" = "x11" ]; then
-        setxkbmap "$SAVED_LAYOUT"
+        setxkbmap "$SAVED_LAYOUT" 2>/dev/null
     elif [ "$ENV_TYPE" = "wayland" ]; then
         case "$DE_WM" in
             hyprland)
-                local kbds=$(hyprctl devices -j | jq -r '.keyboards[].name')
+                local kbds=$(hyprctl devices -j 2>/dev/null | jq -r '.keyboards[].name')
                 for k in $kbds; do
                     hyprctl switchxkblayout "$k" "$SAVED_LAYOUT" >/dev/null 2>&1
                 done
@@ -154,13 +154,13 @@ get_focused_window() {
     elif [ "$ENV_TYPE" = "wayland" ]; then
         case "$DE_WM" in
             hyprland)
-                hyprctl activewindow -j 2>/dev/null | jq -r '.class' | tr '[:upper:]' '[:lower:]'
+                hyprctl activewindow -j 2>/dev/null | jq -r '.class // empty' | tr '[:upper:]' '[:lower:]'
                 ;;
             sway)
-                swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .app_id' | tr '[:upper:]' '[:lower:]'
+                swaymsg -t get_tree 2>/dev/null | jq -r '.. | select(.focused? == true) | .app_id // empty' | tr '[:upper:]' '[:lower:]'
                 ;;
             niri)
-                niri msg -j focused-window 2>/dev/null | jq -r '.["app-id"] // .app_id // .title' | tr '[:upper:]' '[:lower:]'
+                niri msg -j focused-window 2>/dev/null | jq -r '.["app-id"] // .app_id // .title // empty' | tr '[:upper:]' '[:lower:]'
                 ;;
             gnome)
                 gdbus call --session --dest org.gnome.Shell --object-path /org/gnome/Shell --method org.gnome.Shell.Eval "global.display.focus_window.get_wm_class()" 2>/dev/null | awk -F'"' '{print $2}' | tr '[:upper:]' '[:lower:]'
@@ -198,14 +198,12 @@ monitor_focus() {
                 if [ "$LAYOUT_SAVED" = false ]; then
                     SAVED_LAYOUT=$(get_current_layout)
                     
-                    # Ensure SAVED_LAYOUT is captured, fallback to RESTORE_INDEX if empty
                     if [ -z "$SAVED_LAYOUT" ]; then
                         SAVED_LAYOUT="$RESTORE_INDEX"
                     fi
 
                     log "Captured layout before switching: $SAVED_LAYOUT"
                     
-                    # Only trigger layout switch if current layout is not US
                     if [ "$SAVED_LAYOUT" != "$US_INDEX" ] && [ "$SAVED_LAYOUT" != "us" ]; then
                         set_layout_us
                     else
