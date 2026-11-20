@@ -205,6 +205,25 @@ impl CompositorBackend for NiriBackend {
                 break;
             }
 
+            // Sync state upon each connection
+            self.refresh_layouts();
+            self.refresh_windows();
+            if let Some(win) = self.get_current_window() {
+                if let Some(layout) = self.get_current_layout() {
+                    if let Ok(mut eng) = engine.lock() {
+                        let w_key = if eng.config.general.remember_per_window_id && !win.id.is_empty() {
+                            format!("win:{}", win.id)
+                        } else {
+                            format!("app:{}", win.app_id.to_lowercase())
+                        };
+                        eng.active_window = Some(win.clone());
+                        eng.current_layout = Some(layout.clone());
+                        eng.window_layouts.insert(w_key, layout.clone());
+                        eng.app_layouts.insert(format!("app:{}", win.app_id.to_lowercase()), layout);
+                    }
+                }
+            }
+
             let mut child: Child = match Command::new("niri")
                 .args(["msg", "--json", "event-stream"])
                 .stdout(Stdio::piped())
@@ -213,8 +232,10 @@ impl CompositorBackend for NiriBackend {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("[LayoutKeeper] Error spawning niri event-stream: {e}. Retrying in 2s...");
-                    std::thread::sleep(Duration::from_secs(2));
+                    if self.config.general.debug {
+                        eprintln!("[LayoutKeeper] Niri event-stream not ready: {e}. Retrying in 1s...");
+                    }
+                    std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
             };

@@ -108,10 +108,11 @@ uninstall() {
     systemctl --user stop layoutkeeper.service 2>/dev/null || true
     systemctl --user disable layoutkeeper.service 2>/dev/null || true
     rm -f "$SYSTEMD_DIR/layoutkeeper.service"
+    rm -f "$HOME/.config/autostart/layoutkeeper.desktop"
     systemctl --user daemon-reload 2>/dev/null || true
 
     rm -f "/usr/local/bin/layoutkeeper" "$HOME/.local/bin/layoutkeeper"
-    echo -e "${GREEN}✔ LayoutKeeper binary and systemd service removed.${RESET}"
+    echo -e "${GREEN}✔ LayoutKeeper binary, autostart, and systemd service removed.${RESET}"
     echo -e "${DIM}Note: Your configuration remains in $CONFIG_DIR.${RESET}\n"
     exit 0
 }
@@ -235,7 +236,7 @@ EOF
 }
 
 setup_systemd_service() {
-    echo -e "${BOLD}[Systemd User Service Setup]${RESET}"
+    echo -e "${BOLD}[Systemd & Autostart Integration]${RESET}"
     mkdir -p "$SYSTEMD_DIR"
     SERVICE_FILE="$SYSTEMD_DIR/layoutkeeper.service"
 
@@ -244,24 +245,62 @@ setup_systemd_service() {
 Description=LayoutKeeper - Universal Keyboard Layout Manager
 Documentation=https://github.com/MR-PR0G/LayoutKeeper
 After=graphical-session.target
-PartOf=graphical-session.target
+Wants=graphical-session.target
 
 [Service]
 Type=simple
 ExecStart=$TARGET_BIN_DIR/layoutkeeper daemon
-Restart=on-failure
+Restart=always
 RestartSec=2
 KillMode=process
 
 [Install]
-WantedBy=graphical-session.target default.target
+WantedBy=default.target graphical-session.target
 EOF
 
     echo -e " Reloading systemd user daemon..."
     systemctl --user daemon-reload
     systemctl --user enable layoutkeeper.service
     systemctl --user restart layoutkeeper.service
-    echo -e "${GREEN}✔ Service layoutkeeper.service enabled and started in background.${RESET}\n"
+    echo -e "${GREEN}✔ Service layoutkeeper.service enabled and started in background.${RESET}"
+
+    # Setup XDG Autostart for desktop environments
+    mkdir -p "$HOME/.config/autostart"
+    cat > "$HOME/.config/autostart/layoutkeeper.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=LayoutKeeper
+Comment=Universal Per-Window Keyboard Layout Manager
+Exec=$TARGET_BIN_DIR/layoutkeeper daemon
+Terminal=false
+Categories=Utility;System;
+X-GNOME-Autostart-enabled=true
+StartupNotify=false
+EOF
+    echo -e "${GREEN}✔ XDG Autostart entry created in ~/.config/autostart/layoutkeeper.desktop${RESET}"
+
+    # Native compositor autostart hooks
+    if [ -f "$HOME/.config/niri/config.kdl" ]; then
+        if ! grep -q "layoutkeeper" "$HOME/.config/niri/config.kdl"; then
+            echo -e '\nspawn-at-startup "layoutkeeper" "daemon"' >> "$HOME/.config/niri/config.kdl"
+            echo -e "${GREEN}✔ Added spawn-at-startup hook to ~/.config/niri/config.kdl${RESET}"
+        fi
+    fi
+
+    if [ -f "$HOME/.config/hypr/hyprland.conf" ]; then
+        if ! grep -q "layoutkeeper" "$HOME/.config/hypr/hyprland.conf"; then
+            echo -e '\nexec-once = layoutkeeper daemon' >> "$HOME/.config/hypr/hyprland.conf"
+            echo -e "${GREEN}✔ Added exec-once hook to ~/.config/hypr/hyprland.conf${RESET}"
+        fi
+    fi
+
+    if [ -f "$HOME/.config/sway/config" ]; then
+        if ! grep -q "layoutkeeper" "$HOME/.config/sway/config"; then
+            echo -e '\nexec layoutkeeper daemon' >> "$HOME/.config/sway/config"
+            echo -e "${GREEN}✔ Added exec hook to ~/.config/sway/config${RESET}"
+        fi
+    fi
+    echo ""
 }
 
 check_dependencies() {

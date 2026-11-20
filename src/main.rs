@@ -4,7 +4,7 @@ mod config;
 mod engine;
 mod ipc;
 
-use backend::detect_backend;
+use backend::wait_for_backend;
 use config::Config;
 use engine::LayoutKeeperEngine;
 use ipc::IpcServer;
@@ -31,6 +31,14 @@ fn main() {
 }
 
 fn run_daemon() {
+    // Avoid running duplicate background daemons
+    if let Ok(resp) = ipc::send_request(&ipc::IpcRequest::Status) {
+        if resp.success {
+            eprintln!("[LayoutKeeper] Daemon is already running and active. Exiting duplicate instance.");
+            return;
+        }
+    }
+
     let config = Config::load();
     if config.general.debug {
         eprintln!(
@@ -40,7 +48,7 @@ fn run_daemon() {
         );
     }
 
-    let mut backend = detect_backend(&config);
+    let mut backend = wait_for_backend(&config);
     let env_info = backend.environment_info();
 
     eprintln!(
