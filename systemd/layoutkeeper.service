@@ -1,0 +1,15 @@
+[Unit]
+Description=LayoutKeeper - Universal Keyboard Layout Manager
+Documentation=https://github.com/MR-PR0G/LayoutKeeper
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/layoutkeeper daemon
+Restart=on-failure
+RestartSec=2
+KillMode=process
+
+[Install]
+WantedBy=graphical-session.target default.target

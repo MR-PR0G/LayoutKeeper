@@ -1,25 +1,30 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# ==============================================================================
+# LayoutKeeper v2.0 — Universal Keyboard Layout Manager Installer
+# https://github.com/MR-PR0G/LayoutKeeper
+# ==============================================================================
 
-set -e
-set -o pipefail
+set -eo pipefail
 
 APP_NAME="layoutkeeper"
-VERSION="1.2.1"
-REPO_RAW_URL="https://raw.githubusercontent.com/MR-PR0G/LayoutKeeper/main"
-BIN_DIR="/usr/local/bin"
-CONFIG_DIR="$HOME/.config/$APP_NAME"
-SYSTEMD_DIR="$HOME/.config/systemd/user"
+VERSION="2.0.0"
+REPO_URL="https://github.com/MR-PR0G/LayoutKeeper"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/$APP_NAME"
+SYSTEMD_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
-BOLD="\e[1m"
-RED="\e[31m"
-GREEN="\e[32m"
-YELLOW="\e[33m"
-BLUE="\e[34m"
-CYAN="\e[36m"
-RESET="\e[0m"
+# Colors
+BOLD="\033[1m"
+DIM="\033[2m"
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+MAGENTA="\033[35m"
+CYAN="\033[36m"
+RESET="\033[0m"
 
 print_banner() {
-    clear
+    clear 2>/dev/null || true
     echo -e "${CYAN}${BOLD}"
     cat << "EOF"
     __                            __  __ __                           
@@ -30,245 +35,253 @@ print_banner() {
             /____/                               /_/                  
 EOF
     echo -e "${RESET}"
-    echo -e "                 ${BOLD}Version: ${YELLOW}$VERSION${RESET}"
-    echo -e "      Smart Keyboard Layout Switcher for Terminals\n"
+    echo -e "                   ${BOLD}Version: ${YELLOW}v$VERSION (Next-Gen Native)${RESET}"
+    echo -e "        Universal Per-Window Keyboard Layout Manager for Linux\n"
 }
 
-detect_system() {
-    OS_NAME="Unknown"
+detect_environment() {
+    OS_NAME="Linux"
     if [ -f /etc/os-release ]; then
         OS_NAME=$(grep -E "^PRETTY_NAME=" /etc/os-release | cut -d'=' -f2 | tr -d '"')
     fi
+
+    ARCH=$(uname -m)
 
     if [ -n "$WAYLAND_DISPLAY" ]; then
         DISP_SERVER="Wayland"
         if [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ]; then
             COMPOSITOR="Hyprland"
-            LAYOUT_TOOL="hyprctl"
         elif [ -n "$SWAYSOCK" ]; then
             COMPOSITOR="Sway"
-            LAYOUT_TOOL="swaymsg"
-        elif [ -n "$NIRI_SOCKET" ]; then
+        elif [ -n "$NIRI_SOCKET" ] || command -v niri &>/dev/null && pgrep -x niri &>/dev/null; then
             COMPOSITOR="Niri"
-            LAYOUT_TOOL="niri msg"
         elif [[ "${XDG_CURRENT_DESKTOP,,}" == *"gnome"* ]]; then
-            COMPOSITOR="GNOME"
-            LAYOUT_TOOL="gsettings"
+            COMPOSITOR="GNOME Shell"
         elif [[ "${XDG_CURRENT_DESKTOP,,}" == *"kde"* ]]; then
             COMPOSITOR="KDE Plasma"
-            LAYOUT_TOOL="qdbus"
         else
-            COMPOSITOR="${XDG_CURRENT_DESKTOP:-Unknown Wayland}"
-            LAYOUT_TOOL="generic"
+            COMPOSITOR="${XDG_CURRENT_DESKTOP:-Generic Wayland}"
         fi
     elif [ -n "$DISPLAY" ]; then
         DISP_SERVER="X11"
-        COMPOSITOR="${XDG_CURRENT_DESKTOP:-Unknown WM/DE}"
-        LAYOUT_TOOL="setxkbmap"
+        COMPOSITOR="${XDG_CURRENT_DESKTOP:-X11 WM}"
     else
-        DISP_SERVER="None Detected"
+        DISP_SERVER="Headless / None"
         COMPOSITOR="N/A"
-        LAYOUT_TOOL="N/A"
-    fi
-
-    if command -v apt-get &> /dev/null; then PKG_MNGR="apt-get"
-    elif command -v dnf &> /dev/null; then PKG_MNGR="dnf"
-    elif command -v pacman &> /dev/null; then PKG_MNGR="pacman"
-    elif command -v zypper &> /dev/null; then PKG_MNGR="zypper"
-    else PKG_MNGR="Unknown"
     fi
 }
 
 print_sysinfo() {
-    echo -e "${BOLD}[System Information]${RESET}"
-    echo -e "  OS Name         : ${CYAN}$OS_NAME${RESET}"
-    echo -e "  Display Server  : ${YELLOW}$DISP_SERVER${RESET}"
-    echo -e "  Compositor/WM   : ${GREEN}$COMPOSITOR${RESET}"
-    echo -e "  Layout Manager  : ${BLUE}$LAYOUT_TOOL${RESET}"
-    echo -e "  Package Manager : ${YELLOW}$PKG_MNGR${RESET}\n"
+    echo -e "${BOLD}[System Environment]${RESET}"
+    echo -e "  Operating System : ${CYAN}$OS_NAME ($ARCH)${RESET}"
+    echo -e "  Display Server    : ${YELLOW}$DISP_SERVER${RESET}"
+    echo -e "  Compositor / WM   : ${GREEN}$COMPOSITOR${RESET}"
+    echo -e " 📦 Config Directory : ${DIM}$CONFIG_DIR${RESET}\n"
 }
 
-is_installed() {
-    if [ -f "$BIN_DIR/layoutkeeper" ] || systemctl --user is-active --quiet layoutkeeper.service 2>/dev/null; then
-        return 0
+determine_bin_dir() {
+    # Check if user has root/sudo write access to /usr/local/bin
+    if [ "$EUID" -eq 0 ]; then
+        TARGET_BIN_DIR="/usr/local/bin"
+        USE_SUDO=""
+    elif [ -w "/usr/local/bin" ]; then
+        TARGET_BIN_DIR="/usr/local/bin"
+        USE_SUDO=""
+    elif sudo -n true 2>/dev/null; then
+        TARGET_BIN_DIR="/usr/local/bin"
+        USE_SUDO="sudo"
     else
-        return 1
-    fi
-}
-
-select_terminals() {
-    echo -e "${BOLD}[Terminal Detection]${RESET}"
-    echo -e "Scanning system for installed terminals...\n"
-
-    KNOWN_TERMS=(
-        "kitty" "alacritty" "gnome-terminal" "konsole" "foot" "wezterm" 
-        "ghostty" "rio" "warp-terminal" "contour" "hyper" "tabby"
-        "tilix" "terminator" "xterm" "urxvt" "xfce4-terminal" "qterminal" 
-        "st" "lxterminal" "mate-terminal" "pantheon-terminal" 
-        "guake" "yakuake" "tilda" "terminology" "sakura" "mlterm"
-    )
-    DETECTED=()
-
-    for term in "${KNOWN_TERMS[@]}"; do
-        if command -v "$term" &> /dev/null; then
-            DETECTED+=("$term")
+        # Non-root fallback: user-space installation
+        TARGET_BIN_DIR="$HOME/.local/bin"
+        USE_SUDO=""
+        mkdir -p "$TARGET_BIN_DIR"
+        
+        # Ensure ~/.local/bin is in PATH for current session
+        if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+            export PATH="$HOME/.local/bin:$PATH"
         fi
-    done
-
-    if [ ${#DETECTED[@]} -eq 0 ]; then
-        echo -e "${YELLOW}No common terminals automatically detected.${RESET}"
-        DETECTED=("kitty" "gnome-terminal" "alacritty")
-    else
-        echo -e "${GREEN}Detected the following terminals on your system:${RESET}"
-        for i in "${!DETECTED[@]}"; do
-            echo -e "  $((i+1)). ${CYAN}${DETECTED[$i]}${RESET}"
-        done
     fi
-
-    echo -e "\n${BOLD}How would you like to configure LayoutKeeper?${RESET}"
-    echo -e "  1) Use ${GREEN}ALL detected${RESET} terminals"
-    echo -e "  2) Select ${YELLOW}ONE specific${RESET} terminal from the list"
-    echo -e "  3) Enter a ${CYAN}CUSTOM list${RESET} manually"
-    read -p "Choose an option [1/2/3]: " TERM_CHOICE < /dev/tty
-
-    case "$TERM_CHOICE" in
-        2)
-            read -p "Enter the number of the terminal: " TERM_NUM < /dev/tty
-            if [[ "$TERM_NUM" =~ ^[0-9]+$ ]] && [ "$TERM_NUM" -ge 1 ] && [ "$TERM_NUM" -le "${#DETECTED[@]}" ]; then
-                SELECTED_TERMS="${DETECTED[$((TERM_NUM-1))]}"
-            else
-                echo -e "${RED}Invalid selection. Defaulting to all detected.${RESET}"
-                SELECTED_TERMS=$(IFS=, ; echo "${DETECTED[*]}")
-            fi
-            ;;
-        3)
-            read -p "Enter terminals separated by commas (e.g., kitty,foot): " CUSTOM_TERMS < /dev/tty
-            SELECTED_TERMS="${CUSTOM_TERMS// /}"
-            ;;
-        *)
-            SELECTED_TERMS=$(IFS=, ; echo "${DETECTED[*]}")
-            ;;
-    esac
-
-    echo -e "\n${GREEN}✔ Selected Terminals:${RESET} ${CYAN}$SELECTED_TERMS${RESET}\n"
 }
 
 uninstall() {
     echo -e "\n${YELLOW}=> Uninstalling LayoutKeeper...${RESET}"
-    systemctl --user stop layoutkeeper.service || true
-    systemctl --user disable layoutkeeper.service || true
+    systemctl --user stop layoutkeeper.service 2>/dev/null || true
+    systemctl --user disable layoutkeeper.service 2>/dev/null || true
     rm -f "$SYSTEMD_DIR/layoutkeeper.service"
-    systemctl --user daemon-reload
-    
-    sudo rm -f "$BIN_DIR/layoutkeeper"
-    echo -e "${GREEN}=> LayoutKeeper has been uninstalled. (Config files kept in $CONFIG_DIR)${RESET}"
+    systemctl --user daemon-reload 2>/dev/null || true
+
+    rm -f "/usr/local/bin/layoutkeeper" "$HOME/.local/bin/layoutkeeper"
+    echo -e "${GREEN}✔ LayoutKeeper binary and systemd service removed.${RESET}"
+    echo -e "${DIM}Note: Your configuration remains in $CONFIG_DIR.${RESET}\n"
     exit 0
 }
 
-if [ "$1" = "--uninstall" ]; then
-    uninstall
-fi
-
-print_banner
-detect_system
-print_sysinfo
-
-if is_installed; then
-    echo -e "${YELLOW}${BOLD}LayoutKeeper is currently INSTALLED on this system.${RESET}\n"
-    echo -e "${BOLD}Select an action:${RESET}"
-    echo -e "  1) ${GREEN}Reinstall / Update${RESET} LayoutKeeper"
-    echo -e "  2) ${RED}Uninstall${RESET} LayoutKeeper"
-    echo -e "  3) ${CYAN}Cancel${RESET}"
-    read -p "Choose an option [1/2/3]: " ACTION_CHOICE < /dev/tty
-
-    case "$ACTION_CHOICE" in
-        2)
+NON_INTERACTIVE=false
+for arg in "$@"; do
+    case "$arg" in
+        --uninstall|-u)
             uninstall
             ;;
-        3)
-            echo -e "${CYAN}Operation cancelled.${RESET}"
-            exit 0
-            ;;
-        1|*)
-            echo -e "\n${BLUE}=> Proceeding with Reinstallation...${RESET}\n"
+        --yes|-y|--non-interactive)
+            NON_INTERACTIVE=true
             ;;
     esac
-else
-    echo -e "${BOLD}Do you want to proceed with the installation?${RESET}"
-    read -p " [Y/n]: " CONFIRM < /dev/tty
-    if [[ "$CONFIRM" =~ ^[Nn]$ ]]; then
-        echo -e "${RED}Installation aborted.${RESET}"
-        exit 0
+done
+
+build_and_install_binary() {
+    echo -e "${BOLD}[Building & Installing Native Binary]${RESET}"
+
+    determine_bin_dir
+    echo -e " Installation path: ${CYAN}$TARGET_BIN_DIR/layoutkeeper${RESET}"
+
+    # Check if we already have target/release/layoutkeeper built locally
+    if [ -f "./target/release/layoutkeeper" ]; then
+        echo -e "${GREEN}Found pre-compiled release binary!${RESET}"
+        $USE_SUDO cp "./target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
+    elif [ -f "./Cargo.toml" ] && command -v cargo &>/dev/null; then
+        echo -e "${BLUE}Building release binary with Cargo (optimized, LTO enabled)...${RESET}"
+        cargo build --release --locked || cargo build --release
+        $USE_SUDO cp "./target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
+    else
+        # If running from curl pipe, check if cargo is available to build
+        if command -v cargo &>/dev/null; then
+            echo -e "${BLUE}Cloning source repository to build native binary...${RESET}"
+            TEMP_DIR=$(mktemp -d)
+            git clone --depth 1 "$REPO_URL.git" "$TEMP_DIR"
+            (cd "$TEMP_DIR" && cargo build --release)
+            $USE_SUDO cp "$TEMP_DIR/target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
+            rm -rf "$TEMP_DIR"
+        else
+            echo -e "${RED}Error: Cargo (Rust) is required to build LayoutKeeper.${RESET}"
+            echo -e "Please install Rust using: ${CYAN}curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${RESET}"
+            exit 1
+        fi
     fi
-fi
 
-select_terminals
+    $USE_SUDO chmod +x "$TARGET_BIN_DIR/layoutkeeper"
+    echo -e "${GREEN}✔ Binary successfully installed to $TARGET_BIN_DIR/layoutkeeper${RESET}\n"
+}
 
-echo -e "${BOLD}[Installation]${RESET}"
-echo -e "${BLUE}=>${RESET} Installing dependencies using ${YELLOW}$PKG_MNGR${RESET}..."
+select_mode() {
+    echo -e "${BOLD}[Operating Mode Configuration]${RESET}"
+    echo -e "Choose how LayoutKeeper should manage your keyboard layouts:"
+    echo -e "  1) ${GREEN}${BOLD}Per-Window Memory${RESET} (Recommended)"
+    echo -e "     Every single window retains its own keyboard layout automatically."
+    echo -e "  2) ${CYAN}${BOLD}Hybrid Mode${RESET}"
+    echo -e "     Per-window memory for regular apps, but terminals always force US layout."
+    echo -e "  3) ${YELLOW}${BOLD}Terminal Focus Only${RESET} (Classic v1 behavior)"
+    echo -e "     Only switches to US when terminal is focused; restores layout when leaving."
 
-case "$PKG_MNGR" in
-    apt-get)
-        sudo apt-get update
-        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y jq xdotool x11-utils x11-xkb-utils
-        ;;
-    pacman)
-        sudo pacman -Sy --noconfirm jq xdotool xorg-xprop xorg-setxkbmap xorg-xkbcomp
-        ;;
-    dnf)
-        sudo dnf install -y jq xdotool xorg-x11-utils xorg-x11-server-utils
-        ;;
-    zypper)
-        sudo zypper install -y jq xdotool xprop setxkbmap
-        ;;
-    *)
-        echo -e "${YELLOW}=> Warning: Unsupported package manager. Please ensure 'jq', 'xdotool', 'xprop', and 'setxkbmap' are installed manually.${RESET}"
-        ;;
-esac
+    SELECTED_MODE="per-window"
+    if [ "$NON_INTERACTIVE" != "true" ] && [ -t 0 ] && [ -r /dev/tty ]; then
+        read -p "Select mode [1/2/3] (default: 1): " MODE_CHOICE < /dev/tty || MODE_CHOICE="1"
+        case "$MODE_CHOICE" in
+            2) SELECTED_MODE="hybrid" ;;
+            3) SELECTED_MODE="terminal-focus" ;;
+            *) SELECTED_MODE="per-window" ;;
+        esac
+    fi
+    echo -e "✔ Mode selected: ${MAGENTA}${BOLD}$SELECTED_MODE${RESET}\n"
+}
 
-echo -e "${BLUE}=>${RESET} Installing executable to ${CYAN}$BIN_DIR/layoutkeeper${RESET}"
-if [ -f "layoutkeeper" ]; then
-    sudo cp layoutkeeper "$BIN_DIR/layoutkeeper"
-else
-    echo -e "${YELLOW}=> Fetching executable directly from GitHub...${RESET}"
-    sudo curl -fsSL "$REPO_RAW_URL/layoutkeeper" -o "$BIN_DIR/layoutkeeper"
-fi
-sudo chmod +x "$BIN_DIR/layoutkeeper"
+setup_configuration() {
+    mkdir -p "$CONFIG_DIR"
+    CONFIG_FILE="$CONFIG_DIR/config.toml"
 
-echo -e "${BLUE}=>${RESET} Setting up configuration in ${CYAN}$CONFIG_DIR${RESET}"
-mkdir -p "$CONFIG_DIR"
-cat > "$CONFIG_DIR/config" << EOF
-[LayoutKeeper]
-enabled = true
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo -e "${BLUE}Writing default configuration to ${CYAN}$CONFIG_FILE${RESET}..."
+        cat > "$CONFIG_FILE" << EOF
+# ==============================================================================
+# LayoutKeeper Configuration (v2.0)
+# Documentation: https://github.com/MR-PR0G/LayoutKeeper
+# ==============================================================================
+
+[general]
+mode = "$SELECTED_MODE"
+default_layout = "0"
+remember_per_window_id = true
+debounce_ms = 25
 debug = false
-restore_layout = true
-terminals = $SELECTED_TERMS
-us_index = 0
-restore_index = 1
-EOF
 
-echo -e "${BLUE}=>${RESET} Setting up systemd user service"
-mkdir -p "$SYSTEMD_DIR"
-cat > "$SYSTEMD_DIR/layoutkeeper.service" << EOF
+[terminals]
+terminals = [
+    "kitty", "alacritty", "foot", "wezterm", "gnome-terminal",
+    "konsole", "ghostty", "rio", "warp-terminal", "contour",
+    "tilix", "terminator", "xterm", "urxvt", "xfce4-terminal",
+    "qterminal", "st", "lxterminal", "mate-terminal", "guake", "yakuake"
+]
+us_layout = "0"
+
+[rules]
+ignored_apps = [
+    "steam", "steam_app_.*", "gamescope",
+    "org.kde.polkit-kde-authentication-agent-1",
+    "polkit-gnome-authentication-agent-1",
+    "rofi", "wofi", "dmenu", "swaylock", "hyprlock", "waylock"
+]
+
+[rules.enforce_layouts]
+# Example: enforce US on specific app
+# "code" = "0"
+EOF
+    else
+        # Update existing config's mode if chosen
+        sed -i "s/^mode = .*/mode = \"$SELECTED_MODE\"/" "$CONFIG_FILE" 2>/dev/null || true
+    fi
+}
+
+setup_systemd_service() {
+    echo -e "${BOLD}[Systemd User Service Setup]${RESET}"
+    mkdir -p "$SYSTEMD_DIR"
+    SERVICE_FILE="$SYSTEMD_DIR/layoutkeeper.service"
+
+    cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=LayoutKeeper - Terminal Keyboard Switcher
+Description=LayoutKeeper - Universal Keyboard Layout Manager
+Documentation=https://github.com/MR-PR0G/LayoutKeeper
 After=graphical-session.target
+PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=$BIN_DIR/layoutkeeper
+ExecStart=$TARGET_BIN_DIR/layoutkeeper daemon
 Restart=on-failure
-RestartSec=3
+RestartSec=2
+KillMode=process
 
 [Install]
-WantedBy=default.target
+WantedBy=graphical-session.target default.target
 EOF
 
-systemctl --user daemon-reload
-systemctl --user enable layoutkeeper.service
-systemctl --user restart layoutkeeper.service
+    echo -e " Reloading systemd user daemon..."
+    systemctl --user daemon-reload
+    systemctl --user enable layoutkeeper.service
+    systemctl --user restart layoutkeeper.service
+    echo -e "${GREEN}✔ Service layoutkeeper.service enabled and started in background.${RESET}\n"
+}
 
-echo -e "\n${GREEN}${BOLD}✔ Installation Complete!${RESET}"
-echo -e "Service is running in the background."
-echo -e "Run ${CYAN}layoutkeeper status${RESET} to check the status."
-echo -e "Run ${CYAN}layoutkeeper help${RESET} for more commands."
+# ----------------- MAIN FLOW -----------------
+print_banner
+detect_environment
+print_sysinfo
+select_mode
+build_and_install_binary
+setup_configuration
+setup_systemd_service
+
+sleep 0.5
+
+echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════${RESET}"
+echo -e "${GREEN}${BOLD}  ✔ LayoutKeeper v$VERSION is successfully installed & running!${RESET}"
+echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════════════${RESET}\n"
+
+# Verify status using the newly installed CLI
+"$TARGET_BIN_DIR/layoutkeeper" status || true
+
+echo -e "\n${BOLD}Quick commands:${RESET}"
+echo -e "  • Check status : ${CYAN}layoutkeeper status${RESET}"
+echo -e "  • Switch mode  : ${CYAN}layoutkeeper mode <per-window | hybrid | terminal-focus>${RESET}"
+echo -e "  • Toggle pause : ${CYAN}layoutkeeper toggle${RESET}"
+echo -e "  • View memory  : ${CYAN}layoutkeeper list${RESET}"
+echo -e "  • Ignore game  : ${CYAN}layoutkeeper ignore <app>${RESET}"
+echo -e "  • Help menu    : ${CYAN}layoutkeeper help${RESET}\n"
