@@ -129,33 +129,37 @@ for arg in "$@"; do
 done
 
 build_and_install_binary() {
-    echo -e "${BOLD}[Building & Installing Native Binary]${RESET}"
+    echo -e "${BOLD}[Installing LayoutKeeper Native Binary]${RESET}"
 
     determine_bin_dir
     echo -e " Installation path: ${CYAN}$TARGET_BIN_DIR/layoutkeeper${RESET}"
 
-    # Check if we already have target/release/layoutkeeper built locally
+    # 1. Local compiled binary in release target
     if [ -f "./target/release/layoutkeeper" ]; then
-        echo -e "${GREEN}Found pre-compiled release binary!${RESET}"
+        echo -e "${GREEN}Found locally compiled release binary!${RESET}"
         $USE_SUDO cp "./target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
+    # 2. Try fetching pre-compiled release binary from GitHub Releases
+    elif [ "$FORCE_BUILD" != "true" ] && curl -sSfL "https://github.com/MR-PR0G/LayoutKeeper/releases/download/v$VERSION/layoutkeeper" -o /tmp/layoutkeeper-bin 2>/dev/null; then
+        echo -e "${GREEN}Downloaded pre-built binary from GitHub Releases (v$VERSION)!${RESET}"
+        $USE_SUDO cp /tmp/layoutkeeper-bin "$TARGET_BIN_DIR/layoutkeeper"
+        rm -f /tmp/layoutkeeper-bin
+    # 3. Local Cargo build
     elif [ -f "./Cargo.toml" ] && command -v cargo &>/dev/null; then
         echo -e "${BLUE}Building release binary with Cargo (optimized, LTO enabled)...${RESET}"
         cargo build --release --locked || cargo build --release
         $USE_SUDO cp "./target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
+    # 4. Clone and build with Cargo
+    elif command -v cargo &>/dev/null; then
+        echo -e "${BLUE}Building native binary from source...${RESET}"
+        TEMP_DIR=$(mktemp -d)
+        git clone --depth 1 "$REPO_URL.git" "$TEMP_DIR"
+        (cd "$TEMP_DIR" && cargo build --release)
+        $USE_SUDO cp "$TEMP_DIR/target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
+        rm -rf "$TEMP_DIR"
     else
-        # If running from curl pipe, check if cargo is available to build
-        if command -v cargo &>/dev/null; then
-            echo -e "${BLUE}Cloning source repository to build native binary...${RESET}"
-            TEMP_DIR=$(mktemp -d)
-            git clone --depth 1 "$REPO_URL.git" "$TEMP_DIR"
-            (cd "$TEMP_DIR" && cargo build --release)
-            $USE_SUDO cp "$TEMP_DIR/target/release/layoutkeeper" "$TARGET_BIN_DIR/layoutkeeper"
-            rm -rf "$TEMP_DIR"
-        else
-            echo -e "${RED}Error: Cargo (Rust) is required to build LayoutKeeper.${RESET}"
-            echo -e "Please install Rust using: ${CYAN}curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${RESET}"
-            exit 1
-        fi
+        echo -e "${RED}Error: Pre-built binary unavailable and Cargo is not installed.${RESET}"
+        echo -e "To install Cargo: ${CYAN}curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh${RESET}"
+        exit 1
     fi
 
     $USE_SUDO chmod +x "$TARGET_BIN_DIR/layoutkeeper"
@@ -260,11 +264,32 @@ EOF
     echo -e "${GREEN}✔ Service layoutkeeper.service enabled and started in background.${RESET}\n"
 }
 
+check_dependencies() {
+    if [ "$DISP_SERVER" = "X11" ]; then
+        local missing=()
+        if ! command -v setxkbmap &>/dev/null; then missing+=("setxkbmap"); fi
+        if ! command -v xdotool &>/dev/null; then missing+=("xdotool"); fi
+        if [ ${#missing[@]} -gt 0 ]; then
+            echo -e "${YELLOW}Notice: Installing missing X11 helper tools (${missing[*]})...${RESET}"
+            if command -v apt-get &>/dev/null && [ -n "$USE_SUDO" -o "$EUID" -eq 0 ]; then
+                $USE_SUDO apt-get update -qq 2>/dev/null || true
+                $USE_SUDO apt-get install -y -qq x11-xkb-utils xdotool 2>/dev/null || true
+            elif command -v pacman &>/dev/null && [ -n "$USE_SUDO" -o "$EUID" -eq 0 ]; then
+                $USE_SUDO pacman -Sy --noconfirm xorg-setxkbmap xdotool 2>/dev/null || true
+            elif command -v dnf &>/dev/null && [ -n "$USE_SUDO" -o "$EUID" -eq 0 ]; then
+                $USE_SUDO dnf install -y xorg-x11-server-utils xdotool 2>/dev/null || true
+            fi
+        fi
+    fi
+}
+
 # ----------------- MAIN FLOW -----------------
 print_banner
 detect_environment
 print_sysinfo
 select_mode
+determine_bin_dir
+check_dependencies
 build_and_install_binary
 setup_configuration
 setup_systemd_service
